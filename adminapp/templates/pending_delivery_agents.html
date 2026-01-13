@@ -1,0 +1,99 @@
+{% extends 'admin_index.html' %}
+{% block content %}
+
+<div class="container my-5">
+    <h2 class="text-center mb-5 fw-bold">Pending Delivery Agents</h2>
+
+    {% if messages %}
+        <div class="row justify-content-center mb-3">
+            <div class="col-md-8">
+                {% for message in messages %}
+                    <div class="alert alert-info text-center">{{ message }}</div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+
+    {% if pending_boys %}
+        <div class="table-responsive bg-light bg-opacity-25 p-4 rounded shadow-sm">
+            <table class="table table-bordered table-hover text-center align-middle bg-white">
+                <thead>
+                    <tr>
+                        <th>ID</th><th>Profile</th><th>Username</th><th>Email</th>
+                        <th>Phone</th><th>City</th><th>ID Card</th><th>Status</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for boy in pending_boys %}
+                    <tr>
+                        <td>{{ boy.id }}</td>
+
+                        <td>
+                            {% if boy.profile_image %}
+                                <img src="{{ boy.profile_image.url }}" width="50" height="50" class="rounded-circle"
+                                     data-bs-toggle="modal" data-bs-target="#imageModal"
+                                     data-bs-image="{{ boy.profile_image.url }}">
+                            {% else %} N/A {% endif %}
+                        </td>
+
+                        <td>{{ boy.username }}</td>
+                        <td>{{ boy.email }}</td>
+                        <td>{{ boy.phone }}</td>
+                        <td>{{ boy.city }}</td>
+
+                        <td>
+                            {% if boy.id_card_image %}
+                                <img src="{{ boy.id_card_image.url }}" width="60" height="40"
+                                     data-bs-toggle="modal" data-bs-target="#imageModal"
+                                     data-bs-image="{{ boy.id_card_image.url }}">
+                            {% else %} N/A {% endif %}
+                        </td>
+
+                        <td><span class="status-badge status-pending">Pending</span></td>
+
+                        <td>
+                            <form method="POST" action="{% url 'approve_delivery_boy' %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="delivery_boy_id" value="{{ boy.id }}">
+                                <button class="btn btn-success btn-sm">Approve</button>
+                            </form>
+
+                            <form method="POST" action="{% url 'reject_delivery_boy' %}" class="mt-1">
+                                {% csrf_token %}
+                                <input type="hidden" name="delivery_boy_id" value="{{ boy.id }}">
+                                <button class="btn btn-danger btn-sm">Reject</button>
+                            </form>
+                        </td>
+
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="text-center text-muted">No pending delivery agents</p>
+    {% endif %}
+</div>
+
+
+<!-- Image Modal -->
+<div class="modal fade" id="imageModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content bg-transparent border-0">
+            <div class="modal-body text-center">
+                <img id="modalImage" class="img-fluid rounded shadow">
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("show.bs.modal", function (event) {
+    if (event.target.id === "imageModal") {
+        let button = event.relatedTarget;
+        document.getElementById("modalImage").src = button.getAttribute("data-bs-image");
+    }
+});
+</script>
+
+{% endblock %}

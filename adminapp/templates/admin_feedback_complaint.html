@@ -1,0 +1,153 @@
+{% extends 'admin_index.html' %}
+{% block content %}
+
+<div class="container py-4">
+
+    <h2 class="text-center mb-4 fw-bold text-primary">Admin - Feedback & Complaints</h2>
+
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-4 custom-tabs">
+        <li class="nav-item">
+            <a class="nav-link {% if tab == 'feedback' %}active{% endif %}" href="?tab=feedback">Feedbacks</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if tab == 'complaint' %}active{% endif %}" href="?tab=complaint">Complaints</a>
+        </li>
+    </ul>
+
+    <style>
+        .custom-tabs .nav-link {
+            font-weight: 600;
+            color: #555;
+            border-radius: 8px 8px 0 0;
+            padding: 10px 20px;
+        }
+        .custom-tabs .nav-link.active {
+            background-color: #0d6efd;
+            color: white !important;
+        }
+        .cards {
+            border-radius: 12px;
+            overflow: hidden;
+            background: #fff;
+            border: 1px solid #dcdcdc;
+        }
+        .table thead th {
+            background-color: #212529 !important;
+            color: white !important;
+            text-align: center;
+        }
+        .table tbody tr:hover {
+            background-color: #f2f7ff;
+        }
+        .card-header {
+            font-size: 18px;
+            padding: 15px;
+        }
+        .card-footer {
+            background: #f9f9f9;
+            padding: 15px;
+        }
+        .table td {
+            vertical-align: middle;
+            text-align: center;
+        }
+    </style>
+
+    {% if tab == 'feedback' %}
+    <div class="cards shadow-sm mb-4">
+        <div class="card-header bg-primary text-white fw-bold">Feedback List</div>
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th>ID</th>
+                        <th>Appointment</th>
+                        <th>Pet</th>
+                        <th>User</th>
+                        <th>Doctor</th>
+                        <th>Rating</th>
+                        <th>Feedback</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in feedbacks_page %}
+                    <tr>
+                        <td>{{ f.id }}</td>
+                        <td>{{ f.appointment.id }}</td>
+                        <td>{{ f.appointment.pet.name }}</td>
+                        <td>{{ f.appointment.pet.user.username }}</td>
+                        <td>{{ f.appointment.doctor.full_name }}</td>
+                        <td><span class="badge bg-success">{{ f.rating }}</span></td>
+                        <td style="max-width: 300px; white-space: normal;">{{ f.feedback }}</td>
+                        <td>{{ f.created_at|date:"Y-m-d H:i" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="8" class="text-center py-3">No feedback found</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="card-footer text-center">
+            {% if feedbacks_page.has_previous %}
+            <a href="?tab=feedback&fb_page={{ feedbacks_page.previous_page_number }}" class="btn btn-sm btn-outline-primary">Prev</a>
+            {% endif %}
+            <span class="mx-3 fw-bold">Page {{ feedbacks_page.number }} of {{ feedbacks_page.paginator.num_pages }}</span>
+            {% if feedbacks_page.has_next %}
+            <a href="?tab=feedback&fb_page={{ feedbacks_page.next_page_number }}" class="btn btn-sm btn-outline-primary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if tab == 'complaint' %}
+    <div class="cards shadow-sm mb-4">
+        <div class="card-header bg-danger text-white fw-bold">Complaint List</div>
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th>ID</th>
+                        <th>Appointment</th>
+                        <th>Pet</th>
+                        <th>User</th>
+                        <th>Doctor</th>
+                        <th>Category</th>
+                        <th>Description</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in complaints_page %}
+                    <tr>
+                        <td>{{ c.id }}</td>
+                        <td>{{ c.appointment.id }}</td>
+                        <td>{{ c.appointment.pet.name }}</td>
+                        <td>{{ c.appointment.pet.user.username }}</td>
+                        <td>{{ c.appointment.doctor.full_name }}</td>
+                        <td><span class="badge bg-warning text-dark">{{ c.category }}</span></td>
+                        <td style="max-width: 300px; white-space: normal;">{{ c.description }}</td>
+                        <td>{{ c.created_at|date:"Y-m-d H:i" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="8" class="text-center py-3">No complaints found</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="card-footer text-center">
+            {% if complaints_page.has_previous %}
+            <a href="?tab=complaint&cp_page={{ complaints_page.previous_page_number }}" class="btn btn-sm btn-outline-primary">Prev</a>
+            {% endif %}
+            <span class="mx-3 fw-bold">Page {{ complaints_page.number }} of {{ complaints_page.paginator.num_pages }}</span>
+            {% if complaints_page.has_next %}
+            <a href="?tab=complaint&cp_page={{ complaints_page.next_page_number }}" class="btn btn-sm btn-outline-primary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+
+{% endblock %}

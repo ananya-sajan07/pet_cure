@@ -1,0 +1,99 @@
+{% extends 'admin_index.html' %}
+{% block content %}
+
+<style>
+    body { background-color: #55b5e8; }
+    .container h2 { color: #00477d; text-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+    .table thead th { background-color: #e9ecef; font-weight: 600; }
+    .table tbody tr:hover { background-color: #f1f5f9; }
+    .status-badge { padding: 5px 10px; border-radius: 12px; font-weight: 500; font-size: 0.85rem; }
+    .status-pending { background-color: #ffc107; color: #212529; }
+    .btn-sm { font-size: 0.8rem; padding: 4px 10px; }
+    .table img { object-fit: cover; cursor: pointer; }
+</style>
+
+<div class="container my-5">
+    <h2 class="text-center mb-5 fw-bold">Pending Doctors</h2>
+
+    {% if pending_doctors %}
+    <div class="table-responsive bg-light bg-opacity-25 p-4 rounded shadow-sm">
+        <table class="table table-bordered table-hover text-center align-middle bg-white">
+            <thead>
+                <tr>
+                    <th>ID</th><th>Profile</th><th>Name</th><th>Email</th>
+                    <th>Phone</th><th>Address</th><th>ID Card</th><th>Status</th><th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for doctor in pending_doctors %}
+                <tr>
+                    <td>{{ doctor.id }}</td>
+
+                    <td>
+                        {% if doctor.image %}
+                            <img src="{{ doctor.image.url }}" width="50" height="50" class="rounded-circle"
+                                 data-bs-toggle="modal" data-bs-target="#imageModal"
+                                 data-bs-image="{{ doctor.image.url }}">
+                        {% else %} N/A {% endif %}
+                    </td>
+
+                    <td>{{ doctor.full_name }}</td>
+                    <td>{{ doctor.email }}</td>
+                    <td>{{ doctor.phone_number }}</td>
+                    <td>{{ doctor.address }}</td>
+
+                    <td>
+                        {% if doctor.id_card %}
+                            <img src="{{ doctor.id_card.url }}" width="60" height="40"
+                                 data-bs-toggle="modal" data-bs-target="#imageModal"
+                                 data-bs-image="{{ doctor.id_card.url }}">
+                        {% else %} N/A {% endif %}
+                    </td>
+
+                    <td><span class="status-badge status-pending">Pending</span></td>
+
+                    <td>
+                        <form method="POST" action="{% url 'approve_doctor' %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="doctor_id" value="{{ doctor.id }}">
+                            <button class="btn btn-success btn-sm">Approve</button>
+                        </form>
+
+                        <form method="POST" action="{% url 'reject_doctor' %}" class="mt-1">
+                            {% csrf_token %}
+                            <input type="hidden" name="doctor_id" value="{{ doctor.id }}">
+                            <button class="btn btn-danger btn-sm">Reject</button>
+                        </form>
+                    </td>
+
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <p class="text-center text-muted">No pending doctors.</p>
+    {% endif %}
+</div>
+
+<!-- Image Modal -->
+<div class="modal fade" id="imageModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content bg-transparent border-0">
+            <div class="modal-body text-center">
+                <img id="modalImage" class="img-fluid rounded shadow">
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("show.bs.modal", function(event) {
+    if (event.target.id === "imageModal") {
+        let imgSrc = event.relatedTarget.getAttribute("data-bs-image");
+        document.getElementById("modalImage").src = imgSrc;
+    }
+});
+</script>
+
+{% endblock %}
