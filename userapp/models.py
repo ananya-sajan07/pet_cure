@@ -85,7 +85,8 @@ class Payment(models.Model):
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    order = models.ForeignKey(Order, on_delete=models.CASCADE)
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, null=True, blank=True)
+    appointment = models.ForeignKey('Appointment', on_delete=models.CASCADE, null=True, blank=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     payment_method = models.CharField(max_length=10, choices=PAYMENT_METHODS)
     upi_id = models.CharField(max_length=100, blank=True, null=True)
@@ -95,7 +96,7 @@ class Payment(models.Model):
     cvv_number = models.CharField(max_length=4, blank=True, null=True)
     payment_status = models.CharField(max_length=50, default='success')
     payment_date = models.DateTimeField(auto_now_add=True)
-    
+
 from django.db import models
 from doctorapp.models import Doctor, TimeSlot
 from userapp.models import Pet  # assuming Pet model exists
@@ -124,6 +125,7 @@ class Appointment(models.Model):
     diagnosis_and_verdict = models.TextField(blank=True, null=True)
     # verdict = models.TextField(blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
+    fee_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     created_at = models.DateTimeField(auto_now_add=True)
     
     STATUS_CHOICES = [

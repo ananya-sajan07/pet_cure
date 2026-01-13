@@ -804,14 +804,31 @@ class UPIPaymentView(APIView):
         data = request.data
         data["payment_method"] = "upi"
 
+        appointment_id = request.data.get('appointment_id')
+        order_id = request.data.get('order_id')
+
         serializer = PaymentSerializer(data=data)
         if serializer.is_valid():
             payment = serializer.save()
 
-            order = get_object_or_404(Order, id=payment.order.id, user_id=payment.user.id)
+            # Validate amount based on type
+            if appointment_id:
+                # For appointment payment - update appointment status
+                appointment = get_object_or_404(Appointment, id=appointment_id, pet__user_id=payment.user.id)
+                appointment.status = 'payment_completed'
+                payment.appointment = appointment
+                payment.save(update_fields=['appointment'])
+                appointment.status = 'payment_completed'
+                appointment.save()
+                target_amount = appointment.fee_amount
+            elif order_id:
+                order = get_object_or_404(Order, id=order_id, user_id=payment.user.id)
+                target_amount = order.total_amount
+            else:
+                return Response({"error": "Either appointment_id or order_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
             # Validate amount
-            if payment.amount != order.total_amount:
+            if payment.amount != target_amount:
                 payment.payment_status = 'failed'
                 payment.save()
                 return Response({"error": "Amount mismatch"}, status=status.HTTP_400_BAD_REQUEST)
@@ -820,21 +837,20 @@ class UPIPaymentView(APIView):
             payment.payment_status = "success"
             payment.save()
 
-            # ✅ Update order
-            order.status = "order placed"
-            order.estimated_delivery_date = timezone.now() + timedelta(days=5)
-            order.save()
-
-            # ✅ Reduce stock
-            reduce_stock_after_payment(order)
-
-            # ✅ Send email only to that user's email
-            send_order_confirmation_email(order, payment)
+            # Handle order-specific logic
+            if order_id:
+                order.status = "order placed"
+                order.estimated_delivery_date = timezone.now() + timedelta(days=5)
+                order.save()
+                reduce_stock_after_payment(order)
+                send_order_confirmation_email(order, payment)
 
             return Response({
-                "message": "UPI payment successful and order placed",
-                "order_id": order.id,
-                "amount": str(payment.amount)
+                "message": "UPI payment successful",
+                "payment_id": payment.id,
+                "amount": str(payment.amount),
+                "for": "appointment" if appointment_id else "order",
+                appointment_id if appointment_id else "order_id": appointment_id if appointment_id else order_id
             }, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -847,14 +863,30 @@ class CardPaymentView(APIView):
         data = request.data
         data["payment_method"] = "card"
 
+        appointment_id = request.data.get('appointment_id')
+        order_id = request.data.get('order_id')
+
         serializer = PaymentSerializer(data=data)
         if serializer.is_valid():
             payment = serializer.save()
 
-            order = get_object_or_404(Order, id=payment.order.id, user_id=payment.user.id)
+            # Validate amount based on type
+            if appointment_id:
+                # For appointment payment - update appointment status
+                appointment = get_object_or_404(Appointment, id=appointment_id, pet__user_id=payment.user.id)
+                payment.appointment = appointment
+                payment.save(update_fields=['appointment'])
+                appointment.status = 'payment_completed'
+                appointment.save()
+                target_amount = appointment.fee_amount
+            elif order_id:
+                order = get_object_or_404(Order, id=order_id, user_id=payment.user.id)
+                target_amount = order.total_amount
+            else:
+                return Response({"error": "Either appointment_id or order_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
             # Validate amount
-            if payment.amount != order.total_amount:
+            if payment.amount != target_amount:
                 payment.payment_status = 'failed'
                 payment.save()
                 return Response({"error": "Amount mismatch"}, status=status.HTTP_400_BAD_REQUEST)
@@ -863,25 +895,23 @@ class CardPaymentView(APIView):
             payment.payment_status = "success"
             payment.save()
 
-            # ✅ Update order
-            order.status = "order placed"
-            order.estimated_delivery_date = timezone.now() + timedelta(days=5)
-            order.save()
-
-            # ✅ Reduce stock
-            reduce_stock_after_payment(order)
-
-            # ✅ Send email only to that user
-            send_order_confirmation_email(order, payment)
+            # Handle order-specific logic
+            if order_id:
+                order.status = "order placed"
+                order.estimated_delivery_date = timezone.now() + timedelta(days=5)
+                order.save()
+                reduce_stock_after_payment(order)
+                send_order_confirmation_email(order, payment)
 
             return Response({
-                "message": "Card payment successful and order placed",
-                "order_id": order.id,
-                "amount": str(payment.amount)
+                "message": "Card payment successful",
+                "payment_id": payment.id,
+                "amount": str(payment.amount),
+                "for": "appointment" if appointment_id else "order",
+                appointment_id if appointment_id else "order_id": appointment_id if appointment_id else order_id
             }, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 from django.core.mail import EmailMultiAlternatives
 
