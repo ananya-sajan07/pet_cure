@@ -85,8 +85,13 @@ class Payment(models.Model):
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    order = models.ForeignKey(Order, on_delete=models.CASCADE, null=True, blank=True)
-    appointment = models.ForeignKey('Appointment', on_delete=models.CASCADE, null=True, blank=True)
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, null=True, blank=True) #payment.order is not null → Payment is for a product order
+    appointment = models.ForeignKey('Appointment', on_delete=models.CASCADE, null=True, blank=True) #payment.appointment is not null → Payment is for a doctor appointment
+    PAYMENT_FOR_CHOICES = [
+        ('order', 'Product Order'),
+        ('appointment', 'Doctor Appointment'),
+    ]
+    payment_for = models.CharField(max_length=20, choices=PAYMENT_FOR_CHOICES)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     payment_method = models.CharField(max_length=10, choices=PAYMENT_METHODS)
     upi_id = models.CharField(max_length=100, blank=True, null=True)
@@ -127,6 +132,7 @@ class Appointment(models.Model):
     notes = models.TextField(blank=True, null=True)
     fee_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     created_at = models.DateTimeField(auto_now_add=True)
+    
     
     STATUS_CHOICES = [
         ('booked', 'Booked'),

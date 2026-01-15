@@ -807,6 +807,12 @@ class UPIPaymentView(APIView):
         appointment_id = request.data.get('appointment_id')
         order_id = request.data.get('order_id')
 
+        # Determine payment_for
+        if appointment_id:
+            data["payment_for"] = "appointment"
+        elif order_id:
+            data["payment_for"] = "order"
+
         serializer = PaymentSerializer(data=data)
         if serializer.is_valid():
             payment = serializer.save()
@@ -866,9 +872,17 @@ class CardPaymentView(APIView):
         appointment_id = request.data.get('appointment_id')
         order_id = request.data.get('order_id')
 
+        # Determine payment_for
+        if appointment_id:
+            data["payment_for"] = "appointment"
+        elif order_id:
+            data["payment_for"] = "order"
+
         serializer = PaymentSerializer(data=data)
         if serializer.is_valid():
             payment = serializer.save()
+
+           
 
             # Validate amount based on type
             if appointment_id:
@@ -923,6 +937,7 @@ class CancelOrderView(APIView):
 
     def patch(self, request):
         order_id = request.data.get("order_id")
+        
 
         if not order_id:
             return Response(
@@ -958,10 +973,10 @@ class CancelOrderView(APIView):
         )
         email.attach_alternative(html_content, "text/html")
         email.send(fail_silently=False)
-
+    
         return Response(
-            {"status": "success", "message": "Order cancelled and email sent."},
-            status=status.HTTP_200_OK
+            {"status": "succuss", "message": "Order cancelled and email sent."},
+            status = status.HTTP_200_OK
         )
         
         
@@ -1026,6 +1041,7 @@ class NearbyDoctorsView(APIView):
         nearby_doctors = sorted(nearby_doctors, key=lambda x: x["distance_km"])
 
         return Response({"doctors": nearby_doctors}, status=status.HTTP_200_OK)
+        
 
     def calculate_distance(self, lat1, lon1, lat2, lon2):
         """Haversine formula to calculate distance between two coordinates (in KM)."""
