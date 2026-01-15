@@ -24,4 +24,4 @@ userapp\models.py – line 172
 7.	Sheet(8th)
 Email & Phone Number – Validation (using Regex)
 
-8. Extending existing payment system instead of creating a seperate one for product purchase.
+8. Extending existing payment system instead of creating a seperate one for appointment (doctor).
