@@ -1244,7 +1244,23 @@ class BookingDetailsAPIView(APIView):
             "data": data
         }, status=status.HTTP_200_OK)
 
+class VaccineListView(APIView):
+    def get(self, request):
+        pet_type = request.query_params.get('pet_type')
         
+        if not pet_type:
+            return Response({'error': 'pet_type parameter is required'}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        vaccines = Vaccine.objects.filter(pet_type=pet_type)
+        serializer = VaccineSerializer(vaccines, many=True)
+        
+        return Response({
+            'pet_type': pet_type,
+            'count': vaccines.count(),
+            'vaccines': serializer.data
+        }, status=status.HTTP_200_OK)
+      
 class ReorderAPIView(APIView):
     """
     POST /user/reorder/

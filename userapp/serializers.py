@@ -3,6 +3,7 @@ from rest_framework import serializers
 from adminapp.models import *
 from doctorapp.models import *
 from datetime import datetime
+from adminapp.models import Vaccine
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -263,6 +264,9 @@ class AppointmentSerializer(serializers.ModelSerializer): #Used for creating/val
     doctor_phone = serializers.CharField(source='doctor.phone_number', read_only=True)
     slot_time = serializers.CharField(source='slot.time', read_only=True)
     pet_name = serializers.CharField(source='pet.name', read_only=True)
+    vaccine_name = serializers.CharField(source='vaccine.vaccine_name', read_only=True)
+    vaccine_age = serializers.CharField(source='vaccine.recommended_age', read_only=True)
+    disease_protected = serializers.CharField(source='vaccine.disease_protected', read_only=True)
 
     class Meta:
         model = Appointment
@@ -278,10 +282,14 @@ class AppointmentSerializer(serializers.ModelSerializer): #Used for creating/val
             'slot',
             'slot_time',
             'reason',
+            'vaccine',
             'symptoms',
             'status',
             'diagnosis_and_verdict',
-            'notes'
+            'notes',
+            'vaccine_name',
+            'vaccine_age', 
+            'disease_protected',
         ]
 
     def validate(self, data):
@@ -329,6 +337,10 @@ class AppointmentSerializer(serializers.ModelSerializer): #Used for creating/val
                 raise serializers.ValidationError(
                     "Appointments can only be cancelled at least 3 hours before the scheduled time."
                 )
+            
+        # Vaccine appointment → vaccine required
+        if data.get("reason") == "Vaccine" and not data.get("vaccine"):
+            raise serializers.ValidationError("Vaccine selection is required for vaccine appointments.")
 
         return data
 
@@ -358,6 +370,7 @@ class AppointmentsSerializer(serializers.ModelSerializer): #Used for reading/dis
             'slot_start',
             'slot_end',
             'reason',
+            'vaccine',
             'symptoms',
             'status',
             'diagnosis_and_verdict',
@@ -398,4 +411,9 @@ class FeedbackSerializer(serializers.ModelSerializer):
 class ComplaintSerializer(serializers.ModelSerializer):
     class Meta:
         model = Complaint
+        fields = '__all__'
+    
+class VaccineSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Vaccine
         fields = '__all__'

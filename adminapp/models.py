@@ -31,3 +31,24 @@ class ProductImage(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
     image = models.ImageField(upload_to='products/')
     
+class Vaccine(models.Model):
+    PET_TYPE_CHOICES = [
+        ('dog', 'Dog'),
+        ('cat', 'Cat'), 
+        ('poultry', 'Poultry'),
+        ('cattle', 'Cattle'),
+        ('sheep', 'Sheep'),
+        ('goat', 'Goat'),
+        ('swine', 'Swine'),
+    ]
+    
+    pet_type = models.CharField(max_length=20, choices=PET_TYPE_CHOICES)
+    vaccine_name = models.CharField(max_length=200)
+    recommended_age = models.CharField(max_length=100)  # e.g., "6 Weeks", "4 months"
+    disease_protected = models.TextField()
+    booster_required = models.BooleanField(default=False)
+    booster_timing = models.CharField(max_length=100, blank=True, null=True)
+    annual_revaccination = models.BooleanField(default=False)
+    
+    def __str__(self):
+        return f"{self.pet_type} - {self.vaccine_name}"

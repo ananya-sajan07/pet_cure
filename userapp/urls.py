@@ -78,4 +78,5 @@ urlpatterns = [
     path('feedback/', CreateFeedbackView.as_view(), name='create_feedback'),
     path('complaint/', CreateComplaintView.as_view(), name='create_complaint'),
     path('view_feedbacks/', UserFeedbackListView.as_view(), name='user_view_feedbacks'),
+    path('vaccines/', VaccineListView.as_view(), name='vaccine_list'),
 ]
