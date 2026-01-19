@@ -394,11 +394,32 @@ class AppointmentsSerializer(serializers.ModelSerializer): #Used for reading/dis
 class PetsSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.petcategory', read_only=True)
     sub_category_name = serializers.CharField(source='sub_category.petsubcategory', read_only=True)
+    age = serializers.SerializerMethodField()
 
     class Meta:
         model = Pet
         fields = '__all__'  # keeps your existing fields
         read_only_fields = ['id', 'created_at', 'user']
+
+    def get_age(self, obj):
+        if obj.birth_date:
+            from datetime import date
+            today = date.today()
+            age = today.year - obj.birth_date.year
+            if today.month < obj.birth_date.month or (today.month == obj.birth_date.month and today.day < obj.birth_date.day):
+                age -= 1
+            
+            if age == 0:
+                # Calculate in months for young pets
+                months = today.month - obj.birth_date.month
+                if today.day < obj.birth_date.day:
+                    months -= 1
+                if months <= 0:
+                    weeks = (today - obj.birth_date).days // 7
+                    return f"{weeks} weeks" if weeks < 4 else f"{months} months"
+                return f"{months} months"
+            return f"{age} years"
+        return "Unknown"
 
 
 

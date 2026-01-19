@@ -27,10 +27,64 @@ class Pet(models.Model):
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES)
     category = models.ForeignKey(PetCategory, on_delete=models.CASCADE)
     sub_category = models.ForeignKey(PetSubcategory, on_delete=models.CASCADE)
+    pet_type = models.CharField(max_length=20, choices=[
+        ('dog', 'Dog'),
+        ('cat', 'Cat'),
+        ('poultry', 'Poultry'),
+        ('cattle', 'Cattle'),
+        ('sheep', 'Sheep'),
+        ('goat', 'Goat'),
+        ('swine', 'Swine'),
+        ('other', 'Other'),
+    ], default='dog')
     weight = models.FloatField()
     pet_image = models.ImageField(upload_to='pets/')
     health_condition = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def get_age(self):
+        from datetime import date
+        if self.birth_date:
+            today = date.today()
+            
+            # Handle future dates (test data issue)
+            if self.birth_date > today:
+                return "Future date"
+            
+            # Calculate age in days
+            age_days = (today - self.birth_date).days
+            
+            if age_days < 28:  # Less than 4 weeks
+                return f"{age_days // 7} weeks"
+            elif age_days < 365:  # Less than 1 year
+                months = age_days // 30
+                return f"{months} months"
+            else:
+                years = age_days // 365
+                return f"{years} years"
+        return "Unknown"
+
+    def save(self, *args, **kwargs):
+        # Auto-set pet_type based on category name
+        if self.category and not self.pet_type:
+            category_name = self.category.petcategory.lower()
+            if 'dog' in category_name:
+                self.pet_type = 'dog'
+            elif 'cat' in category_name:
+                self.pet_type = 'cat'
+            elif 'bird' in category_name or 'poultry' in category_name:
+                self.pet_type = 'poultry'
+            elif 'cattle' in category_name or 'cow' in category_name:
+                self.pet_type = 'cattle'
+            elif 'sheep' in category_name:
+                self.pet_type = 'sheep'
+            elif 'goat' in category_name:
+                self.pet_type = 'goat'
+            elif 'swine' in category_name or 'pig' in category_name:
+                self.pet_type = 'swine'
+            else:
+                self.pet_type = 'other'
+        super().save(*args, **kwargs)
     
     
 class ProductBooking(models.Model):

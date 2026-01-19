@@ -1246,21 +1246,79 @@ class BookingDetailsAPIView(APIView):
 
 class VaccineListView(APIView):
     def get(self, request):
+        pet_id = request.query_params.get('pet_id')
         pet_type = request.query_params.get('pet_type')
         
+        # If pet_id provided, get pet_type from pet
+        if pet_id:
+            try:
+                pet = Pet.objects.get(id=pet_id)
+                pet_type = pet.pet_type
+            except Pet.DoesNotExist:
+                return Response({'error': 'Pet not found'}, 
+                              status=status.HTTP_404_NOT_FOUND)
+        
         if not pet_type:
-            return Response({'error': 'pet_type parameter is required'}, 
+            return Response({'error': 'Either pet_id or pet_type parameter is required'}, 
                           status=status.HTTP_400_BAD_REQUEST)
-        
+    
         vaccines = Vaccine.objects.filter(pet_type=pet_type)
-        serializer = VaccineSerializer(vaccines, many=True)
         
-        return Response({
+        # Parse pet age for recommendations
+        pet_age_weeks = None
+        if pet_id and pet.birth_date:
+            from datetime import date
+            today = date.today()
+            age_days = (today - pet.birth_date).days
+            pet_age_weeks = age_days // 7
+            
+        # Serialize with recommendation flag
+        vaccine_data = []
+        for vaccine in vaccines:
+            vaccine_dict = VaccineSerializer(vaccine).data
+            
+            # Basic recommendation logic
+            if pet_age_weeks:
+                # Parse vaccine recommended age (simplified)
+                rec_age = vaccine.recommended_age.lower()
+                if 'week' in rec_age:
+                    try:
+                        weeks_needed = int(''.join(filter(str.isdigit, rec_age.split()[0])))
+                        vaccine_dict['is_recommended'] = pet_age_weeks >= weeks_needed
+                    except:
+                        vaccine_dict['is_recommended'] = False
+                elif 'month' in rec_age:
+                    try:
+                        months_needed = int(''.join(filter(str.isdigit, rec_age.split()[0])))
+                        # Convert pet age to months
+                        pet_age_months = pet_age_weeks // 4
+                        vaccine_dict['is_recommended'] = pet_age_months >= months_needed
+                    except:
+                        vaccine_dict['is_recommended'] = False
+                else:
+                    vaccine_dict['is_recommended'] = True  # For adult vaccines
+            else:
+                vaccine_dict['is_recommended'] = None
+            
+            vaccine_data.append(vaccine_dict)
+        
+        # If pet_id provided, also return pet info
+        response_data = {
             'pet_type': pet_type,
-            'count': vaccines.count(),
-            'vaccines': serializer.data
-        }, status=status.HTTP_200_OK)
-      
+            'count': len(vaccine_data),
+            'vaccines': vaccine_data
+        }
+        
+        if pet_id:
+            response_data['pet_info'] = {
+                'id': pet.id,
+                'name': pet.name,
+                'pet_type': pet.pet_type,
+                'age': pet.get_age() if hasattr(pet, 'get_age') else 'Unknown'
+            }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+    
 class ReorderAPIView(APIView):
     """
     POST /user/reorder/
