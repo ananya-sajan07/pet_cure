@@ -140,9 +140,10 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = ''
-EMAIL_HOST_PASSWORD = ''  # Not your Gmail password!
-DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+EMAIL_HOST_USER = 'biteseat@gmail.com'
+EMAIL_HOST_PASSWORD = 'akvfjwihpkmanvae'
+EMAIL_USE_SSL = False  # Important: Use TLS, not SSL
+DEFAULT_FROM_EMAIL = 'Bite & Seat <biteseat@gmail.com>'
 
 
 CORS_ALLOW_ALL_ORIGINS = True

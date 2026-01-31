@@ -1,3 +1,4 @@
+from xml.parsers.expat import errors
 from django.shortcuts import get_object_or_404, render,redirect
 from .models import *
 from adminapp.models import *
@@ -6,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework import status,viewsets,generics
 from rest_framework.views import APIView
 from decimal import Decimal
-from datetime import timedelta
+from datetime import datetime, timedelta
 from django.utils import timezone
 from math import radians, sin, cos, sqrt, atan2
 
@@ -35,6 +36,152 @@ from math import radians, sin, cos, sqrt, atan2
 #                 "data": request.data
 #             }
 #             return Response(response_data,status=status.HTTP_400_BAD_REQUEST)
+
+def get_next_vaccine_for_pet(pet):
+    """
+    Calculate the next vaccine for a pet based on:
+    1. Pet's current age
+    2. Already given vaccines
+    3. Vaccine schedule
+    4. Annual revaccinations
+    """
+    from datetime import date, timedelta
+    from adminapp.models import Vaccine
+    from userapp.models import Appointment
+    
+    if not pet or not pet.birth_date:
+        return None
+    
+    today = date.today()
+    
+    # Get all vaccines for this pet's subcategory
+    available_vaccines = Vaccine.objects.filter(
+        subcategory=pet.sub_category
+    ).order_by('recommended_age')
+    
+    # Get already given vaccines with dates
+    given_appointments = Appointment.objects.filter(
+        pet=pet, 
+        reason="Vaccine",
+        vaccine__isnull=False,
+        status__in=['booked', 'payment_completed', 'completed']
+    ).select_related('vaccine').order_by('-date')
+    
+    # For annual revaccination, only consider PAST appointments
+    past_given_appointments = given_appointments.filter(date__lte=today)
+    
+    given_vaccine_ids = list(given_appointments.values_list('vaccine_id', flat=True))
+    
+    # Helper: Parse age string to weeks
+    def parse_age_to_weeks(age_str):
+        age_str = str(age_str).lower()
+        
+        # Extract numbers
+        import re
+        numbers = re.findall(r'\d+', age_str)
+        if not numbers:
+            return 0
+        
+        num = int(numbers[0])
+        
+        if 'week' in age_str:
+            return num
+        elif 'month' in age_str:
+            return num * 4  # Approx: 1 month = 4 weeks
+        elif 'day' in age_str:
+            return num // 7  # Convert days to weeks
+        elif 'year' in age_str:
+            return num * 52  # 1 year = 52 weeks
+        else:
+            # Default assumption for formats like "4 months of age"
+            if 'month' in age_str:
+                return num * 4
+            return 0
+    
+    # Calculate pet's age
+    age_days = (today - pet.birth_date).days
+    age_weeks = age_days // 7
+    age_years = age_days // 365
+    
+    # Check if pet is adult (more than 1 year old)
+    is_adult = age_years >= 1
+    
+    if is_adult:
+        # ADULT PET LOGIC: Focus on annual revaccinations
+        
+        # 1. First, check for annual revaccinations needed
+        annual_vaccines = available_vaccines.filter(annual_revaccination=True)
+        
+        for vaccine in annual_vaccines:
+            # Find when this vaccine was last given (PAST appointments only)
+            last_given = past_given_appointments.filter(vaccine_id=vaccine.id).first()
+            
+            if last_given:
+                # Check if it's been more than 1 year
+                days_since_last = (today - last_given.date).days
+                if days_since_last >= 365:
+                    return vaccine
+            else:
+                # Vaccine never given to this adult pet
+                # Check if it's an adult-appropriate vaccine (not puppy-only)
+                vaccine_age_weeks = parse_age_to_weeks(vaccine.recommended_age)
+                if vaccine_age_weeks <= 52:  # 1 year or less
+                    # Puppy vaccine, adult probably doesn't need it
+                    continue
+                return vaccine
+        
+        for vaccine in available_vaccines:
+            if vaccine.id not in given_vaccine_ids:
+                vaccine_age_weeks = parse_age_to_weeks(vaccine.recommended_age)
+                
+                # Skip puppy vaccines for adults
+                if vaccine_age_weeks < 24:
+                    continue
+                    
+                if vaccine_age_weeks <= age_weeks:
+                    return vaccine
+                
+                # 3. No vaccines needed for adult
+                return None
+        
+    else:
+        # PUPPY/KITTEN LOGIC: Follow age-based schedule
+        # First, find ALL vaccines the pet hasn't taken yet
+        vaccines_not_taken = []
+        for vaccine in available_vaccines:
+            if vaccine.id not in given_vaccine_ids:
+                vaccine_age_weeks = parse_age_to_weeks(vaccine.recommended_age)
+                vaccines_not_taken.append((vaccine, vaccine_age_weeks))
+        
+        # Sort by recommended age (weeks)
+        vaccines_not_taken.sort(key=lambda x: x[1])
+        
+        # Return the first vaccine the pet is eligible for OR the first one in schedule
+        for vaccine, vaccine_age_weeks in vaccines_not_taken:
+            if age_weeks >= vaccine_age_weeks:
+                return vaccine
+        
+        # If no vaccines are eligible yet, return the first one in schedule
+        if vaccines_not_taken:
+            return vaccines_not_taken[0][0]  # Return earliest vaccine
+    
+    return None
+    
+    # STRATEGY 2: Check for annual revaccinations
+    annual_vaccines = available_vaccines.filter(annual_revaccination=True)
+    
+    for vaccine in annual_vaccines:
+        # Find when this vaccine was last given
+        last_given = given_appointments.filter(vaccine_id=vaccine.id).first()
+        
+        if last_given:
+            # Check if it's been more than 1 year
+            days_since_last = (today - last_given.date).days
+            if days_since_last >= 365:
+                return vaccine
+    
+    # No next vaccine found
+    return None
 
 class UserRegistrationView(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -775,12 +922,18 @@ def send_order_confirmation_email(order, payment):
     # Plain text fallback
     plain_message = strip_tags(html_message)
     
+    # Validate email address
+    user_email = getattr(order.user, 'email', '')
+    if not user_email or '@' not in user_email:
+        print(f"WARNING: Invalid email for user {order.user.id}, skipping email")
+        return
+    
     # Send email
     send_mail(
         subject,
         plain_message,
         settings.DEFAULT_FROM_EMAIL,
-        [order.user.email],  # ✅ Send only to the user
+        [user_email],  # ✅ Send only to the user
         html_message=html_message,
         fail_silently=False,
     )
@@ -822,14 +975,15 @@ class UPIPaymentView(APIView):
                 # For appointment payment - update appointment status
                 appointment = get_object_or_404(Appointment, id=appointment_id, pet__user_id=payment.user.id)
                 appointment.status = 'payment_completed'
-                payment.appointment = appointment
+                payment.appointment = appointment #Writing the appointment ticket number(left) on the receipt (RHS)
                 payment.save(update_fields=['appointment'])
-                appointment.status = 'payment_completed'
                 appointment.save()
                 target_amount = appointment.fee_amount
+            
             elif order_id:
                 order = get_object_or_404(Order, id=order_id, user_id=payment.user.id)
                 target_amount = order.total_amount
+            
             else:
                 return Response({"error": "Either appointment_id or order_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -839,7 +993,7 @@ class UPIPaymentView(APIView):
                 payment.save()
                 return Response({"error": "Amount mismatch"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # ✅ Payment successful
+            #Payment successful
             payment.payment_status = "success"
             payment.save()
 
@@ -851,53 +1005,120 @@ class UPIPaymentView(APIView):
                 reduce_stock_after_payment(order)
                 send_order_confirmation_email(order, payment)
 
-            return Response({
+            response_data = {
                 "message": "UPI payment successful",
                 "payment_id": payment.id,
                 "amount": str(payment.amount),
                 "for": "appointment" if appointment_id else "order",
-                appointment_id if appointment_id else "order_id": appointment_id if appointment_id else order_id
-            }, status=status.HTTP_200_OK)
+            }
+            
+            if appointment_id:
+                response_data["appointment_id"] = appointment_id
+            else:
+                response_data["order_id"] = order_id
+            
+            return Response(response_data, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class CardPaymentView(APIView):
-    """Handles Card Payment"""
+from datetime import datetime
+import re                                       # Add this import for card validation
+
+class CardPaymentView(APIView):                 #Handles Card Payment
+
+    def validate_card_data(self, data):         #Validate card details
+        errors = {}
+        
+        # Cardholder name validation
+        if not data.get('cardholder_name') or len(data['cardholder_name'].strip()) < 2:
+            errors['cardholder_name'] = "Valid cardholder name is required"
+        
+        # Card number validation (basic Luhn check)
+        card_number = data.get('card_number', '').replace(' ', '')
+        if not card_number.isdigit() or len(card_number) not in [15, 16]:
+            errors['card_number'] = "Valid card number is required (15-16 digits)"
+        
+        # Expiry date validation (MM/YY format)
+        expiry_date = data.get('expiry_date', '')
+        if not expiry_date:  # Add this check
+            errors['expiry_date'] = "Expiry date is required"
+        elif not re.match(r'^(0[1-9]|1[0-2])/([0-9]{2})$', expiry_date):
+            errors['expiry_date'] = "Expiry date must be in MM/YY format"
+        else:
+            # Check if card is expired
+            month, year = expiry_date.split('/')
+            current_year = datetime.now().year % 100
+            current_month = datetime.now().month
+
+            try:
+                if int(year) < current_year or (int(year) == current_year and int(month) < current_month):
+                    errors['expiry_date'] = "Card has expired"
+            except ValueError:
+                errors['expiry_date'] = "Invalid expiry date format"
+        
+        # CVV validation
+        cvv = data.get('cvv_number', '')
+        if not cvv.isdigit() or len(cvv) not in [3, 4]:
+            errors['cvv_number'] = "Valid CVV is required (3-4 digits)"
+        
+        return errors
 
     def post(self, request):
-        data = request.data
+        data = request.data.copy()  # Use copy to avoid mutating request.data
         data["payment_method"] = "card"
 
         appointment_id = request.data.get('appointment_id')
         order_id = request.data.get('order_id')
 
+        # Validate card details first
+        card_errors = self.validate_card_data(data)
+        if card_errors:
+            return Response({"error": "Invalid card details", "details": card_errors}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+
         # Determine payment_for
         if appointment_id:
             data["payment_for"] = "appointment"
+        
         elif order_id:
             data["payment_for"] = "order"
+        
+        else:
+            return Response({"error": "Either appointment_id or order_id is required"}, 
+                          status=status.HTTP_400_BAD_REQUEST)
 
-        serializer = PaymentSerializer(data=data)
+        # Make a copy of card_number before masking for validation
+        original_card_number = data.get('card_number', '')
+
+        # Mask sensitive data in request data for logging/security
+        if original_card_number:
+            if len(original_card_number) > 4:
+                data['card_number'] = '*' * (len(original_card_number) - 4) + original_card_number[-4:]
+            else:
+                data['card_number'] = original_card_number  # Keep as is if too short
+
+        # Create a copy of data for serializer with original card number
+        serializer_data = request.data.copy()  # ← Copy from ORIGINAL request data
+        serializer_data["payment_method"] = "card"
+        serializer_data["payment_for"] = "appointment" if appointment_id else "order"
+
+        serializer = PaymentSerializer(data=serializer_data)
         if serializer.is_valid():
             payment = serializer.save()
 
-           
-
             # Validate amount based on type
             if appointment_id:
-                # For appointment payment - update appointment status
                 appointment = get_object_or_404(Appointment, id=appointment_id, pet__user_id=payment.user.id)
                 payment.appointment = appointment
                 payment.save(update_fields=['appointment'])
                 appointment.status = 'payment_completed'
                 appointment.save()
                 target_amount = appointment.fee_amount
+            
             elif order_id:
                 order = get_object_or_404(Order, id=order_id, user_id=payment.user.id)
                 target_amount = order.total_amount
-            else:
-                return Response({"error": "Either appointment_id or order_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
             # Validate amount
             if payment.amount != target_amount:
@@ -905,35 +1126,78 @@ class CardPaymentView(APIView):
                 payment.save()
                 return Response({"error": "Amount mismatch"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # ✅ Payment successful
-            payment.payment_status = "success"
-            payment.save()
+            # Log the payment details for debugging
+            print(f"Payment attempt - User: {payment.user.id}, Amount: {payment.amount}, Card ending: {original_card_number[-4:] if original_card_number else 'N/A'}")
 
-            # Handle order-specific logic
-            if order_id:
-                order.status = "order placed"
-                order.estimated_delivery_date = timezone.now() + timedelta(days=5)
-                order.save()
-                reduce_stock_after_payment(order)
-                send_order_confirmation_email(order, payment)
+            # Simulate payment processing
+            # In real implementation, integrate with payment gateway here
+            try:
+                # Validate amount matches
+                if payment.amount != target_amount:
+                    raise Exception(f"Amount mismatch. Payment: {payment.amount}, Expected: {target_amount}")
 
-            return Response({
-                "message": "Card payment successful",
-                "payment_id": payment.id,
-                "amount": str(payment.amount),
-                "for": "appointment" if appointment_id else "order",
-                appointment_id if appointment_id else "order_id": appointment_id if appointment_id else order_id
-            }, status=status.HTTP_200_OK)
+                # Check for test card numbers
+                test_cards = ['4111111111111111', '4242424242424242', '5555555555554444']
+                if original_card_number in test_cards:
+                    print("Test card detected - simulating successful payment")
+                # Simulate payment processing delay
+                # payment_gateway_response = process_card_payment(payment)
+                # if not payment_gateway_response.success:
+                # raise Exception("Payment gateway declined")
+                
+                payment.payment_status = "success"
+                payment.save()
+
+                # Handle order-specific logic
+                if order_id:
+                    order.status = "order placed"
+                    order.estimated_delivery_date = timezone.now() + timedelta(days=5)
+                    order.save()
+                    reduce_stock_after_payment(order)
+                    send_order_confirmation_email(order, payment)
+
+                # Prepare response data
+                response_data = {
+                    "message": "Card payment successful",
+                    "payment_id": payment.id,
+                    "amount": str(payment.amount),
+                    "for": "appointment" if appointment_id else "order",
+                    "payment_method": "card",
+                    "last_four_digits": payment.card_number[-4:] if payment.card_number else None,
+                    "cardholder_name": payment.cardholder_name,
+                    "transaction_date": payment.payment_date.isoformat()
+                }
+
+                # Add the correct ID field
+                if appointment_id:
+                    response_data["appointment_id"] = appointment_id
+                else:
+                    response_data["order_id"] = order_id
+
+                return Response(response_data, status=status.HTTP_200_OK)
+
+            except Exception as e:
+                # Handle payment processing failure
+                payment.payment_status = "failed"
+                payment.save()
+                # Log the actual error for debugging
+                import traceback
+                print("="*50)
+                print(f"CARD PAYMENT ERROR: {str(e)}")
+                print(f"Error type: {type(e).__name__}")
+                print("Traceback:")
+                traceback.print_exc()
+                print("="*50)
+                return Response({"error": "Payment processing failed. Please check your card details and try again."}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 from django.core.mail import EmailMultiAlternatives
 
-class CancelOrderView(APIView):
-    """Allows user to cancel an order without authentication"""
+class CancelOrderView(APIView):       #Allows user to cancel an order without authentication
 
-    authentication_classes = []  # 👈 Disable authentication
-    permission_classes = []      # 👈 Disable permission checks
+    authentication_classes = []       # Disable authentication
+    permission_classes = []           # Disable permission checks
 
     def patch(self, request):
         order_id = request.data.get("order_id")
@@ -960,7 +1224,7 @@ class CancelOrderView(APIView):
         order.save()
 
         # Send email to user
-        subject = f"❌ Your Order #{order.id} Has Been Cancelled"
+        subject = f"Your Order #{order.id} Has Been Cancelled"
         context = {"user": order.user, "order": order}
         html_content = render_to_string("order_cancelled.html", context)
         text_content = f"Hi {order.user.username}, your order #{order.id} has been cancelled successfully."
@@ -1089,12 +1353,31 @@ class DoctorSlotListView(APIView):
         except Doctor.DoesNotExist:
             return Response({"error": "Doctor not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # ✅ 5. Fetch slots
+        # ✅ 5. Get current time in local timezone (Asia/Kolkata)
+        from django.utils import timezone
+        import pytz
+        
+        # Get current time in UTC
+        now_utc = timezone.now()
+        
+        # Convert to Asia/Kolkata timezone
+        kolkata_tz = pytz.timezone('Asia/Kolkata')
+        now_kolkata = now_utc.astimezone(kolkata_tz)
+        
+        current_time = now_kolkata.time()
+        today_date = now_kolkata.date()
+        
+        # ✅ 6. Fetch slots
         slots = TimeSlot.objects.filter(doctor=doctor).order_by('start_time')
 
-        # ✅ 6. Build slot data with availability
+        # ✅ 7. Build slot data with availability
         data = []
         for slot in slots:
+            # Skip slots that have already passed for today
+            if appointment_date == today_date:
+                if slot.start_time <= current_time:
+                    continue  # Skip past slots for today
+            
             # Count non-cancelled appointments for this slot
             booked_count = Appointment.objects.filter(
                 doctor=doctor,
@@ -1127,6 +1410,16 @@ from .serializers import AppointmentSerializer
 
 class AppointmentBookingView(APIView):
     def post(self, request):
+        # Additional validation before serializer
+        reason = request.data.get('reason')
+        vaccine_id = request.data.get('vaccine')
+        
+        if reason == "Vaccine" and not vaccine_id:
+            return Response({
+                "error": "vaccine_id is required when reason is 'Vaccine'",
+                "message": "Please select a vaccine from the vaccine list"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
         serializer = AppointmentSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -1179,7 +1472,110 @@ class CancelAppointmentView(APIView):
             'appointment_id': appointment.id,
             'status': appointment.status
         }, status=status.HTTP_200_OK)
+
+# class VaccineBookingView(APIView):
+#     """
+#     Simplified vaccine-only booking
+#     Input: pet_id, vaccine_id, preferred_date
+#     Output: Auto-assigned doctor, slot, and appointment
+#     """
     
+#     def post(self, request):
+#         pet_id = request.data.get('pet_id')
+#         vaccine_id = request.data.get('vaccine_id')
+#         preferred_date = request.data.get('preferred_date')
+        
+#         # Validate required fields
+#         if not all([pet_id, vaccine_id, preferred_date]):
+#             return Response({'error': 'pet_id, vaccine_id, and preferred_date are required'},
+#                           status=status.HTTP_400_BAD_REQUEST)
+        
+#         try:
+#             pet = Pet.objects.get(id=pet_id)
+#             vaccine = Vaccine.objects.get(id=vaccine_id)
+#         except (Pet.DoesNotExist, Vaccine.DoesNotExist):
+#             return Response({'error': 'Invalid pet or vaccine ID'},
+#                           status=status.HTTP_400_BAD_REQUEST)
+
+#         # Check if pet's subcategory is in allowed list
+#         allowed_subcategories = ['Dog', 'Cat', 'Poultry', 'Cattle', 'Sheep', 'Goat', 'Swine']
+#         if pet.sub_category.petsubcategory not in allowed_subcategories:
+#             return Response({
+#                 'error': 'Vaccine not available for this pet type',
+#                 'pet_subcategory': pet.sub_category.petsubcategory,
+#                 'allowed_subcategories': allowed_subcategories
+#             }, status=status.HTTP_400_BAD_REQUEST)
+        
+#         # Special case: Sheep and Goat can use Cattle vaccines
+#         if pet.sub_category.petsubcategory in ['Sheep', 'Goat']:
+#             cattle_sub = PetSubcategory.objects.get(petsubcategory='Cattle')
+#             if vaccine.subcategory != cattle_sub:
+#                 return Response({
+#                     'error': 'This vaccine is not available for this pet type',
+#                     'pet_subcategory': pet.sub_category.petsubcategory,
+#                     'vaccine_subcategory': vaccine.subcategory.petsubcategory,
+#                     'note': 'Sheep and Goat can use Cattle vaccines'
+#                 }, status=status.HTTP_400_BAD_REQUEST)
+        
+#         else:
+#             # For other pets, vaccine must match their subcategory
+#             if vaccine.subcategory != pet.sub_category:
+#                 return Response({
+#                     'error': 'This vaccine is not available for this pet type',
+#                     'pet_subcategory': pet.sub_category.petsubcategory,
+#                     'vaccine_subcategory': vaccine.subcategory.petsubcategory
+#                 }, status=status.HTTP_400_BAD_REQUEST)
+        
+#         # Find available doctor (currently all doctors handle all pet types)
+#         # TODO: Add doctor specialization field later
+#         doctors = Doctor.objects.filter(is_approved=True)
+#         if not doctors.exists():
+#             return Response({'error': 'No doctors available'},
+#                           status=status.HTTP_400_BAD_REQUEST)
+        
+#         # For now, pick first available doctor
+#         # Later: Filter doctors by pet type specialization
+#         doctor = doctors.first()
+        
+#         # Find available slot for preferred date
+#         try:
+#             appointment_date = datetime.strptime(preferred_date, "%Y-%m-%d").date()
+#         except ValueError:
+#             return Response({'error': 'Invalid date format. Use YYYY-MM-DD'},
+#                           status=status.HTTP_400_BAD_REQUEST)
+        
+#         # Find available slot (simplified: first available slot)
+#         slots = TimeSlot.objects.filter(
+#             doctor=doctor,
+#             is_available=True
+#         ).order_by('start_time')
+        
+#         if not slots.exists():
+#             return Response({'error': 'No available slots for selected date'},
+#                           status=status.HTTP_400_BAD_REQUEST)
+        
+#         slot = slots.first()
+        
+#         # Create appointment
+#         appointment = Appointment.objects.create(
+#             pet=pet,
+#             doctor=doctor,
+#             date=appointment_date,
+#             slot=slot,
+#             appointment_type='clinical',
+#             reason='Vaccine',
+#             vaccine=vaccine,
+#             fee_amount=100.00,
+#             status='booked'
+#         )
+        
+#         serializer = AppointmentSerializer(appointment)
+        
+#         return Response({
+#             'message': 'Vaccine booked successfully',
+#             'appointment': serializer.data
+#         }, status=status.HTTP_201_CREATED)
+
 class PetBookingListView(APIView):
     """
     GET /user/bookings/?pet_id=<id>
@@ -1206,11 +1602,59 @@ class PetBookingListView(APIView):
 
         # ✅ Return formatted data
         serializer = AppointmentsSerializer(appointments, many=True)
-        return Response({
+        
+        # Calculate next vaccine
+        next_vaccine = get_next_vaccine_for_pet(pet)
+        
+        response_data = {
             "pet_name": pet.name,
             "total_bookings": appointments.count(),
             "bookings": serializer.data
-        }, status=status.HTTP_200_OK)
+        }
+        
+        # Add next vaccine info if available
+        if next_vaccine:
+
+            # Check if this is an annual revaccination
+            
+            is_annual = False
+            
+            from datetime import date
+            today = date.today()
+            
+            # First, check if pet has had this vaccine before
+            past_vaccine_exists = Appointment.objects.filter(
+                pet=pet,
+                vaccine=next_vaccine,
+                date__lte=today,
+                status__in=['booked', 'payment_completed', 'completed']
+            ).exists()
+            
+            # If pet has had it before AND vaccine requires annual revaccination
+            if past_vaccine_exists and next_vaccine.annual_revaccination:
+                is_annual = True
+            
+            # Determine note
+            if is_annual:
+                note = "Annual revaccination due"
+            elif "week" in next_vaccine.recommended_age.lower() and "year" in pet.get_age().lower():
+                note = "Catch-up vaccine (missed earlier schedule)"
+            else:
+                note = "Next scheduled vaccine"
+            
+            response_data["next_vaccine"] = {
+                "vaccine_id": next_vaccine.id,
+                "vaccine_name": next_vaccine.vaccine_name,
+                "recommended_age": next_vaccine.recommended_age,
+                "disease_protected": next_vaccine.disease_protected,
+                "pet_current_age": pet.get_age(),
+                "is_annual_revaccination": is_annual,
+                "note": "Annual revaccination due" if is_annual else "Next scheduled vaccine"
+            }
+        else:
+            response_data["next_vaccine"] = None
+        
+        return Response(response_data, status=status.HTTP_200_OK)
         
 
 class BookingDetailsAPIView(APIView):
@@ -1247,26 +1691,37 @@ class BookingDetailsAPIView(APIView):
 class VaccineListView(APIView):
     def get(self, request):
         pet_id = request.query_params.get('pet_id')
-        pet_type = request.query_params.get('pet_type')
         
-        # If pet_id provided, get pet_type from pet
-        if pet_id:
-            try:
-                pet = Pet.objects.get(id=pet_id)
-                pet_type = pet.pet_type
-            except Pet.DoesNotExist:
-                return Response({'error': 'Pet not found'}, 
-                              status=status.HTTP_404_NOT_FOUND)
-        
-        if not pet_type:
-            return Response({'error': 'Either pet_id or pet_type parameter is required'}, 
+        if not pet_id:
+            return Response({'error': 'pet_id parameter is required'}, 
                           status=status.HTTP_400_BAD_REQUEST)
-    
-        vaccines = Vaccine.objects.filter(pet_type=pet_type)
+        
+        try:
+            pet = Pet.objects.get(id=pet_id)
+        except Pet.DoesNotExist:
+            return Response({'error': 'Pet not found'}, 
+                          status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if pet's subcategory is in allowed list
+        allowed_subcategories = ['Dog', 'Cat', 'Poultry', 'Cattle', 'Sheep', 'Goat', 'Swine']
+        if pet.sub_category.petsubcategory not in allowed_subcategories:
+            return Response({
+                'error': 'Vaccine not available for this pet type',
+                'pet_subcategory': pet.sub_category.petsubcategory,
+                'allowed_subcategories': allowed_subcategories
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Special case: Sheep and Goat share vaccines with Cattle
+        if pet.sub_category.petsubcategory in ['Sheep', 'Goat']:
+            cattle_sub = PetSubcategory.objects.get(petsubcategory='Cattle')
+            vaccines = Vaccine.objects.filter(subcategory=cattle_sub)
+        else:
+            # Filter vaccines by pet's subcategory
+            vaccines = Vaccine.objects.filter(subcategory=pet.sub_category)
         
         # Parse pet age for recommendations
         pet_age_weeks = None
-        if pet_id and pet.birth_date:
+        if pet.birth_date:
             from datetime import date
             today = date.today()
             age_days = (today - pet.birth_date).days
@@ -1302,20 +1757,18 @@ class VaccineListView(APIView):
             
             vaccine_data.append(vaccine_dict)
         
-        # If pet_id provided, also return pet info
         response_data = {
-            'pet_type': pet_type,
+            'pet_id': pet_id,
+            'pet_subcategory': pet.sub_category.petsubcategory,
             'count': len(vaccine_data),
-            'vaccines': vaccine_data
-        }
-        
-        if pet_id:
-            response_data['pet_info'] = {
+            'vaccines': vaccine_data,
+            'pet_info': {
                 'id': pet.id,
                 'name': pet.name,
-                'pet_type': pet.pet_type,
-                'age': pet.get_age() if hasattr(pet, 'get_age') else 'Unknown'
+                'sub_category': pet.sub_category.petsubcategory,
+                'age': pet.get_age()
             }
+        }
         
         return Response(response_data, status=status.HTTP_200_OK)
     
@@ -1398,7 +1851,8 @@ load_dotenv(ENV_PATH)
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Debug print (masked)
-print("Loaded GOOGLE_API_KEY:", GOOGLE_API_KEY)
+#print("Loaded GOOGLE_API_KEY:", GOOGLE_API_KEY)
+print("Loaded GOOGLE_API_KEY:", GOOGLE_API_KEY if GOOGLE_API_KEY else "NOT FOUND")
 print("ENV_PATH:", ENV_PATH)
 print("File exists:", os.path.exists(ENV_PATH))
 
@@ -1505,22 +1959,53 @@ class PetFoodRecommendationAPIView(APIView):
         return Response({"message": "Use POST method for recommendations."})
 
     def post(self, request):
-        breed = request.data.get("breed")
-        age = request.data.get("age")
-        health = request.data.get("health")
+        pet_id = request.data.get("pet_id")
 
-        if not breed or age is None or not health:
+        if not pet_id:
             return Response(
-                {"error": "breed, age, and health are required."},
+                {"error": "pet_id is required."},
                 status=400
             )
+
+        try:
+            pet = Pet.objects.get(id=pet_id)
+
+        except Pet.DoesNotExist:
+            return Response(
+                {"error": "Pet not found."},
+                status=404
+            )
+
+        breed = pet.sub_category.petsubcategory  # Or appropriate breed field
+        age = pet.get_age()
+
+        # Extract numeric age from string (e.g., "3 years" -> 3)
+        age_str = str(pet.get_age())
+        age_years = 1  # Default if parsing fails
+
+        try:
+            if 'year' in age_str:
+                # Extract number from "X years" string
+                import re
+                match = re.search(r'(\d+)\s*year', age_str)
+                if match:
+                    age_years = int(match.group(1))
+            elif 'month' in age_str:
+                # Convert months to years (approximate)
+                match = re.search(r'(\d+)\s*month', age_str)
+                if match:
+                    months = int(match.group(1))
+                    age_years = max(1, months // 12)  # At least 1 year if older than 6 months
+        except:
+            age_years = 1
+        health = pet.health_condition or "Generally healthy"
 
         prompt = f"""
         You are a professional veterinary diet planner.
 
         A pet has the following details:
         - Breed: {breed}
-        - Age: {age} years
+        - Age: {age_years} years
         - Health Condition: {health}
 
         Provide the best food recommendations including:
@@ -1533,6 +2018,11 @@ class PetFoodRecommendationAPIView(APIView):
 
         Reply in clear bullet points.
         """
+        print(f"DEBUG - Pet Food Recommendation Request:")
+        print(f"  Pet ID: {pet_id}")
+        print(f"  Breed: {breed}")
+        print(f"  Age: {age_years} years (original: {age})")
+        print(f"  Health: {health}")
 
         try:
             model = genai.GenerativeModel("gemini-2.5-flash")
@@ -1603,7 +2093,6 @@ class CreateComplaintView(APIView):
         }, status=status.HTTP_400_BAD_REQUEST)
 
 
-
 class UserFeedbackListView(APIView):
     def get(self, request):
         user_id = request.query_params.get("user_id")
@@ -1626,3 +2115,93 @@ class UserFeedbackListView(APIView):
             "count": feedbacks.count(),
             "data": serializer.data
         }, status=status.HTTP_200_OK)
+    
+class UserComplaintListView(APIView):
+    def get(self, request):
+        user_id = request.query_params.get("user_id")
+
+        if not user_id:
+            return Response({
+                "status": "error",
+                "message": "user_id is required as a query parameter."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Fetch complaints where appointment -> pet -> user matches
+        complaints = Complaint.objects.filter(
+            appointment__pet__user_id=user_id
+        ).order_by('-created_at')
+
+        serializer = ComplaintSerializer(complaints, many=True)
+
+        return Response({
+            "status": "success",
+            "count": complaints.count(),
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+class NextVaccineRecommendationView(APIView):
+    def get(self, request):
+        pet_id = request.query_params.get('pet_id')
+        
+        if not pet_id:
+            return Response({"error": "pet_id parameter is required"}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            pet = Pet.objects.get(id=pet_id)
+        except Pet.DoesNotExist:
+            return Response({"error": "Pet not found"}, 
+                          status=status.HTTP_404_NOT_FOUND)
+        
+        next_vaccine = get_next_vaccine_for_pet(pet)
+        
+        if next_vaccine:
+            # Check if this is an annual revaccination
+            is_annual = False
+            today = date.today()
+            
+            # Check if pet has had this vaccine before (PAST appointments)
+            past_vaccine_exists = Appointment.objects.filter(
+                pet=pet,
+                vaccine=next_vaccine,
+                date__lte=today,
+                status__in=['booked', 'payment_completed', 'completed']
+            ).exists()
+            
+            # If pet has had it before AND vaccine requires annual revaccination
+            if past_vaccine_exists and next_vaccine.annual_revaccination:
+                is_annual = True
+            
+            # Determine note
+            if is_annual:
+                note = "Annual revaccination due"
+            elif "week" in next_vaccine.recommended_age.lower() and "year" in pet.get_age().lower():
+                note = "Catch-up vaccine (missed earlier schedule)"
+            else:
+                note = "Next scheduled vaccine"
+            
+            response_data = {
+                "pet_id": pet.id,
+                "pet_name": pet.name,
+                "pet_age": pet.get_age(),
+                "pet_subcategory": pet.sub_category.petsubcategory,
+                "next_vaccine": {
+                    "vaccine_id": next_vaccine.id,
+                    "vaccine_name": next_vaccine.vaccine_name,
+                    "recommended_age": next_vaccine.recommended_age,
+                    "disease_protected": next_vaccine.disease_protected,
+                    "annual_revaccination": next_vaccine.annual_revaccination,
+                    "is_annual_revaccination": is_annual,
+                    "note": note
+                }
+            }
+        else:
+            response_data = {
+                "pet_id": pet.id,
+                "pet_name": pet.name,
+                "pet_age": pet.get_age(),
+                "message": "No vaccine recommendations at this time",
+                "next_vaccine": None
+            }
+        
+        return Response(response_data, status=status.HTTP_200_OK)

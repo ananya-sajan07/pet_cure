@@ -31,16 +31,19 @@ urlpatterns = [
         schema_view.without_ui(cache_timeout=0),
         name="schema-json",
     ),
+
     path(
         "swagger/",
         schema_view.with_ui("swagger", cache_timeout=0),
         name="schema-swagger-ui",
     ),
+
     path(
         "redoc/",
         schema_view.with_ui("redoc", cache_timeout=0),
         name="schema-redoc",
     ),
+    
     path("",include(router.urls)),
     path('login/', LoginView.as_view(), name='user_login'),
     path('view_profile/',UserProfileView.as_view({'get':'list'}),name='view_profile'),
@@ -78,5 +81,7 @@ urlpatterns = [
     path('feedback/', CreateFeedbackView.as_view(), name='create_feedback'),
     path('complaint/', CreateComplaintView.as_view(), name='create_complaint'),
     path('view_feedbacks/', UserFeedbackListView.as_view(), name='user_view_feedbacks'),
+    path('view_complaints/', UserComplaintListView.as_view(), name='user_view_complaints'),
     path('vaccines/', VaccineListView.as_view(), name='vaccine_list'),
+    path('next_vaccine/', NextVaccineRecommendationView.as_view(), name='next_vaccine'),
 ]

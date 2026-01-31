@@ -1,3 +1,4 @@
+from decimal import Decimal
 from .models import *
 from rest_framework import serializers
 from adminapp.models import *
@@ -290,6 +291,7 @@ class AppointmentSerializer(serializers.ModelSerializer): #Used for creating/val
             'vaccine_name',
             'vaccine_age', 
             'disease_protected',
+            'fee_amount'
         ]
 
     def validate(self, data):
@@ -341,7 +343,11 @@ class AppointmentSerializer(serializers.ModelSerializer): #Used for creating/val
         # Vaccine appointment → vaccine required
         if data.get("reason") == "Vaccine" and not data.get("vaccine"):
             raise serializers.ValidationError("Vaccine selection is required for vaccine appointments.")
-
+                # Set default fee for vaccine appointments
+        
+        if data.get("reason") == "Vaccine" and not data.get("fee_amount"):
+            data["fee_amount"] = Decimal("100.00")
+            
         return data
 
 class AppointmentsSerializer(serializers.ModelSerializer): #Used for reading/displaying appointments
@@ -374,7 +380,8 @@ class AppointmentsSerializer(serializers.ModelSerializer): #Used for reading/dis
             'symptoms',
             'status',
             'diagnosis_and_verdict',
-            'notes'
+            'notes',
+            'fee_amount'
         ]
 
     def get_slot_id(self, obj):
@@ -435,6 +442,9 @@ class ComplaintSerializer(serializers.ModelSerializer):
         fields = '__all__'
     
 class VaccineSerializer(serializers.ModelSerializer):
+    subcategory_name = serializers.CharField(source='subcategory.petsubcategory', read_only=True)
+    subcategory_id = serializers.IntegerField(source='subcategory.id', read_only=True)
+    
     class Meta:
         model = Vaccine
-        fields = '__all__'
+        fields = ['id', 'subcategory_id', 'subcategory_name', 'vaccine_name', 'recommended_age', 'disease_protected', 'booster_required', 'booster_timing', 'annual_revaccination']
