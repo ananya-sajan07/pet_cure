@@ -3,7 +3,14 @@ from django.contrib import messages
 from .models import *
 from deliveryapp.models import *
 from userapp.models import *
-# Create your views here.
+from django.template.defaulttags import register
+
+@register.filter
+def get_item(dictionary, key):
+    """Template filter to get dictionary item by key"""
+    if dictionary and key:
+        return dictionary.get(str(key))
+    return None
 
 def admin_index(request):
     return render(request,'admin_index.html')
@@ -111,23 +118,62 @@ def delete_pet_subcategory(request):
         messages.success(request, "Subcategory deleted successfully!")
     return redirect('add_pet_category')
 
-def add_product_category(request):
+def add_vaccine(request):
     if request.method == 'POST':
-        category_name = request.POST.get('productcategory')
+        subcategory_id = request.POST.get('subcategory')
+        vaccine_name = request.POST.get('vaccine_name')
+        recommended_age = request.POST.get('recommended_age')
+        disease_protected = request.POST.get('disease_protected')
+        booster_required = 'booster_required' in request.POST
+        booster_timing = request.POST.get('booster_timing', '')
+        annual_revaccination = 'annual_revaccination' in request.POST
 
-        # Check if category already exists
-        if ProductCategory.objects.filter(productcategory__iexact=category_name).exists():
-            messages.warning(request, "This product category already exists.")
-            return redirect('add_product_category')
+        # Validate required fields
+        if not all([subcategory_id, vaccine_name, recommended_age, disease_protected]):
+            messages.error(request, "Please fill all required fields.")
+            return redirect('add_vaccine')
 
-        # Save new category
-        ProductCategory.objects.create(productcategory=category_name)
-        messages.success(request, f"Product category '{category_name}' added successfully!")
-        return redirect('add_product_category')
+        # Check for duplicate vaccine name in same subcategory
+        try:
+            subcategory = PetSubcategory.objects.get(id=subcategory_id)
+            if Vaccine.objects.filter(subcategory=subcategory, vaccine_name__iexact=vaccine_name).exists():
+                messages.error(request, f"Vaccine '{vaccine_name}' already exists for {subcategory.petsubcategory}.")
+                return redirect('add_vaccine')
+        except PetSubcategory.DoesNotExist:
+            messages.error(request, "Invalid subcategory selected.")
+            return redirect('add_vaccine')
 
-    # Show all existing categories
-    categories = ProductCategory.objects.all().order_by('-id')
-    return render(request, 'add_product_category.html', {'categories': categories})
+        try:
+            subcategory = PetSubcategory.objects.get(id=subcategory_id)
+        except PetSubcategory.DoesNotExist:
+            messages.error(request, "Invalid subcategory selected.")
+            return redirect('add_vaccine')
+
+        # Check if vaccine already exists for this subcategory
+        if Vaccine.objects.filter(
+            subcategory=subcategory, 
+            vaccine_name__iexact=vaccine_name
+        ).exists():
+            messages.warning(request, f"Vaccine '{vaccine_name}' already exists for {subcategory.petsubcategory}.")
+            return redirect('add_vaccine')
+
+        # Create vaccine
+        Vaccine.objects.create(
+            subcategory=subcategory,
+            vaccine_name=vaccine_name,
+            recommended_age=recommended_age,
+            disease_protected=disease_protected,
+            booster_required=booster_required,
+            booster_timing=booster_timing if booster_required else '',
+            annual_revaccination=annual_revaccination
+        )
+
+        messages.success(request, f"Vaccine '{vaccine_name}' added successfully!")
+        return redirect('add_vaccine')
+
+    # GET request - show form
+    subcategories = PetSubcategory.objects.all()
+    return render(request, 'add_vaccine.html', {'subcategories': subcategories})
 
 def edit_product_category(request):
     if request.method == 'POST':
@@ -140,6 +186,41 @@ def edit_product_category(request):
             messages.success(request, "Product category updated successfully!")
         return redirect('add_product_category')
 
+def edit_vaccine(request):
+    if request.method == 'POST':
+        vaccine_id = request.POST.get('vaccine_id')
+        vaccine = get_object_or_404(Vaccine, id=vaccine_id)
+        
+        # Get updated data
+        vaccine_name = request.POST.get('vaccine_name')
+        recommended_age = request.POST.get('recommended_age')
+        disease_protected = request.POST.get('disease_protected')
+        booster_required = 'booster_required' in request.POST
+        booster_timing = request.POST.get('booster_timing', '')
+        annual_revaccination = 'annual_revaccination' in request.POST
+        
+        # Check for duplicate vaccine name (excluding current vaccine)
+        if vaccine_name != vaccine.vaccine_name:
+            if Vaccine.objects.filter(
+                subcategory=vaccine.subcategory, 
+                vaccine_name__iexact=vaccine_name
+            ).exclude(id=vaccine_id).exists():
+                messages.error(request, f"Vaccine '{vaccine_name}' already exists for {vaccine.subcategory.petsubcategory}.")
+                return redirect('view_vaccines')
+        
+        # Update vaccine
+        vaccine.vaccine_name = vaccine_name
+        vaccine.recommended_age = recommended_age
+        vaccine.disease_protected = disease_protected
+        vaccine.booster_required = booster_required
+        vaccine.booster_timing = booster_timing if booster_required else ''
+        vaccine.annual_revaccination = annual_revaccination
+        vaccine.save()
+        
+        messages.success(request, f"Vaccine '{vaccine_name}' updated successfully!")
+        return redirect('view_vaccines')
+    
+    return redirect('view_vaccines')
 
 # Delete Product Category
 def delete_product_category(request):
@@ -150,6 +231,17 @@ def delete_product_category(request):
         messages.success(request, "Product category deleted successfully!")
         return redirect('add_product_category')
     
+def delete_vaccine(request):
+    if request.method == 'POST':
+        vaccine_id = request.POST.get('vaccine_id')
+        vaccine = get_object_or_404(Vaccine, id=vaccine_id)
+        vaccine_name = vaccine.vaccine_name
+        vaccine.delete()
+        messages.success(request, f"Vaccine '{vaccine_name}' deleted successfully!")
+        return redirect('view_vaccines')
+    else:
+        messages.error(request, "Invalid request method.")
+        return redirect('view_vaccines')
 
 def add_products(request):
     product_categories = ProductCategory.objects.all()
@@ -211,6 +303,32 @@ def view_products(request):
         'products': products,
     })
     
+def view_vaccines(request):
+    # Get filter parameters
+    subcategory_id = request.GET.get('subcategory')
+    petcategory_id = request.GET.get('petcategory')
+    
+    # Start with all vaccines
+    vaccines = Vaccine.objects.select_related('subcategory__petcategory').all()
+    
+    # Apply filters if provided
+    if subcategory_id:
+        vaccines = vaccines.filter(subcategory_id=subcategory_id)
+    
+    if petcategory_id:
+        vaccines = vaccines.filter(subcategory__petcategory_id=petcategory_id)
+    
+    # Get all categories and subcategories for filter dropdowns
+    pet_categories = PetCategory.objects.all()
+    pet_subcategories = PetSubcategory.objects.all()
+    
+    return render(request, 'view_vaccines.html', {
+        'vaccines': vaccines,
+        'pet_categories': pet_categories,
+        'pet_subcategories': pet_subcategories,
+        'selected_petcategory': int(petcategory_id) if petcategory_id else None,
+        'selected_subcategory': int(subcategory_id) if subcategory_id else None,
+    })
 
 def edit_products(request):
     product_id = request.GET.get('id')
@@ -497,3 +615,21 @@ def admin_feedback_complaint_view(request):
         "feedbacks_page": fb_page,
         "complaints_page": cp_page,
     })
+
+def add_product_category(request):
+    if request.method == 'POST':
+        category_name = request.POST.get('productcategory')
+
+        # Check if category already exists
+        if ProductCategory.objects.filter(productcategory__iexact=category_name).exists():
+            messages.warning(request, "This product category already exists.")
+            return redirect('add_product_category')
+
+        # Save new category
+        ProductCategory.objects.create(productcategory=category_name)
+        messages.success(request, f"Product category '{category_name}' added successfully!")
+        return redirect('add_product_category')
+
+    # Show all existing categories
+    categories = ProductCategory.objects.all().order_by('-id')
+    return render(request, 'add_product_category.html', {'categories': categories})

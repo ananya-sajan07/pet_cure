@@ -415,12 +415,25 @@
                     <a href="#deliverySubmenu" data-bs-toggle="collapse" aria-expanded="false" class="dropdown-toggle">
                         <i class="fas fa-cogs"></i> Delivery Agent
                     </a>
+                    
                     <ul class="collapse list-unstyled" id="deliverySubmenu">
                         <li><a href="{% url 'pending_delivery_agents' %}"><i class="fas fa-users"></i> Manage Delivery Agents</a></li>
-                        <li><a href="{% url 'approved_delivery_agents' %}"><i class="fas fa-users"></i> View Approved Delivery Agents</a></li>
-                        <li><a href="{% url 'rejected_delivery_agents' %}"><i class="fas fa-users"></i> View Rejected Delivery Agents</a></li>
+                        <li><a href="{% url 'approved_delivery_agents' %}"><i class="fas fa-users"></i>View Approved Delivery Agents</a></li>
+                        <li><a href="{% url 'rejected_delivery_agents' %}"><i class="fas fa-users"></i>View Rejected Delivery Agents</a></li>
                     </ul>
                 </li>
+
+                <li>
+                    <a href="#vaccineSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="dropdown-toggle">
+                        <i class="fas fa-syringe"></i> Vaccines
+                    </a>
+                    <ul class="collapse list-unstyled" id="vaccineSubmenu">
+                        <li><a href="{% url 'add_vaccine' %}"><i class="fas fa-plus-circle"></i> Add Vaccine</a></li>
+                        <li><a href="{% url 'view_vaccines' %}"><i class="fas fa-list"></i> View Vaccines</a></li>
+                    </ul>
+
+                </li>
+
                 <li>
                     <a href="#doctorSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="dropdown-toggle">
                         <i class="fas fa-cogs"></i> Doctors
@@ -499,7 +512,23 @@
                             </div>
                         </a>
                     </div> -->
+                    <!-- Add Vaccine Card -->
+                    <div class="col-md-4">
+                        <a href="{% url 'add_vaccine' %}" style="text-decoration: none;">
+                            <div class="card">
+                                <p class="c-txt">Add Vaccine</p>
+                            </div>
+                        </a>
+                    </div>
 
+                    <!-- View Vaccines Card -->
+                    <div class="col-md-4">
+                        <a href="{% url 'view_vaccines' %}" style="text-decoration: none;">
+                            <div class="card">
+                                <p class="c-txt">View Vaccines</p>
+                            </div>
+                        </a>
+                    </div>
                     <div class="col-md-4">
                         <a href="{% url 'add_pet_category' %}" style="text-decoration: none;">
                             <div class="card">
